@@ -65,6 +65,7 @@ type gcsFile struct {
 	roundTripper http.RoundTripper
 	chunkSize    int64
 	Backend      StorageBackend
+	fileSize     int64
 }
 
 func (tf *gcsFile) Close() error {
@@ -87,7 +88,12 @@ func (tf *gcsFile) ReadAt(p []byte, off int64) (int, error) {
 		return 0, fmt.Errorf("Object(%q).NewReader: %v", tf.key, err)
 	}
 	defer rc.Close()
-	fullbuf := make([]byte, tf.chunkSize)
+	bytesToRead := tf.chunkSize
+	if chunkStart+tf.chunkSize > tf.fileSize {
+		bytesToRead = tf.fileSize - chunkStart
+	}
+
+	fullbuf := make([]byte, bytesToRead)
 	n, err := io.ReadFull(rc, fullbuf)
 	if err != nil {
 		fmt.Printf("io.ReadFull: %v", err)
@@ -115,7 +121,15 @@ func (tf *gcsFile) Sync(flag sqlite3vfs.SyncType) error {
 }
 
 func (tf *gcsFile) FileSize() (int64, error) {
-	return tf.Backend.FileSize(tf.name)
+	if tf.fileSize != 0 {
+		return tf.fileSize, nil
+	}
+	fsize, err := tf.Backend.FileSize(tf.name)
+	if err != nil {
+		return 0, err
+	}
+	tf.fileSize = fsize
+	return fsize, nil
 }
 
 func (tf *gcsFile) Lock(elock sqlite3vfs.LockType) error {

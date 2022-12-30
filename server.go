@@ -3,19 +3,23 @@ package main
 import (
 	"context"
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 	lru "github.com/hashicorp/golang-lru"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/psanford/sqlite3vfs"
+	"github.com/rs/cors"
 	"simplemap.co/tileserver/sqlite3vfsstorage"
 )
 
@@ -31,6 +35,7 @@ type ServerState struct {
 	Bucket        string
 	Prefix        string
 	TileUrl       string
+	TileJSONUrl   string
 }
 
 func errorResponse(w http.ResponseWriter, statusCode int, message string) {
@@ -70,6 +75,8 @@ func (s ServerState) tileHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, 404, "Tile Not Found")
 		return
 	}
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(tiledata)
 }
 
@@ -102,6 +109,28 @@ func (s ServerState) tileJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+//go:embed map.html
+var mapHTML string
+
+func (s ServerState) mapHTMLHandler(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	tileset := params["tileset"]
+	tileJSONUrl := fmt.Sprintf(s.TileJSONUrl, tileset)
+
+	ctx := context.Background()
+	_, err := s.getDB(ctx, tileset)
+	if err != nil {
+		errorResponse(w, 404, "Tileset Not Found")
+		return
+	}
+
+	mapHTML = strings.ReplaceAll(mapHTML, "{{tileJSONUrl}}", tileJSONUrl)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(mapHTML))
+
+}
+
 func checkPathExists(ctx context.Context, storagePath string) (bool, error) {
 
 	backend, err := sqlite3vfsstorage.GetBackend(storagePath)
@@ -119,10 +148,11 @@ func (s ServerState) getDB(ctx context.Context, tileset string) (*sql.DB, error)
 	if ok {
 		return dbConn.(*sql.DB), nil
 	}
-
-	storagePath := fmt.Sprintf("%s://%s/%s/%s.mbtiles", s.Scheme, s.Bucket, s.Prefix, tileset)
-	fmt.Println(storagePath)
-	ok, err := checkPathExists(ctx, storagePath)
+	storagePath, err := url.JoinPath(fmt.Sprintf("%s://%s", s.Scheme, s.Bucket), s.Prefix, tileset+".mbtiles")
+	if err != nil {
+		return nil, err
+	}
+	ok, err = checkPathExists(ctx, storagePath)
 	if err != nil {
 		return nil, err
 	}
@@ -187,15 +217,38 @@ func main() {
 		CacheHandler: cache,
 	}
 
-	server := ServerState{
-		DbConnections: dbConnections,
-		Scheme:        "gs",
-		Bucket:        "simplemapco-assets",
-		Prefix:        "tilesets",
-		TileUrl:       "http://localhost/tile/%s/{z}/{x}/{y}.mvt",
+	mbtilesPath := os.Getenv("MBTILES_PATH")
+	if mbtilesPath == "" {
+		log.Fatal("MBTILES_PATH env var not set")
 	}
 
-	err := sqlite3vfs.RegisterVFS("storagevfs", &vfs)
+	parsedURI, err := url.Parse(mbtilesPath)
+	if err != nil {
+		log.Fatalf("error parsing MBTILES_PATH: %v", err)
+	}
+
+	tsURL := os.Getenv("TILESERVER_URL")
+	if tsURL == "" {
+		log.Fatal("TILESERVER_URL env var not set")
+	}
+
+	tileUrl, err := url.JoinPath(tsURL, "/tile/")
+	tileJSONUrl := tileUrl + "%s.json"
+	tileUrl += "%s/{z}/{x}/{y}.mvt"
+	if err != nil {
+		log.Fatalf("error contructing TILESERVER_URL: %v", err)
+	}
+
+	server := ServerState{
+		DbConnections: dbConnections,
+		Scheme:        parsedURI.Scheme,
+		Bucket:        parsedURI.Host,
+		Prefix:        parsedURI.Path,
+		TileUrl:       tileUrl,
+		TileJSONUrl:   tileJSONUrl,
+	}
+
+	err = sqlite3vfs.RegisterVFS("storagevfs", &vfs)
 	if err != nil {
 		log.Fatalf("register vfs err: %s", err)
 	}
@@ -203,7 +256,14 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/tile/{tileset}.json", server.tileJSONHandler).Methods("GET")
 	r.HandleFunc("/tile/{tileset}/{z}/{x}/{y}.{format}", server.tileHandler).Methods("GET")
-	http.Handle("/", r)
+	r.HandleFunc("/map/{tileset}.html", server.mapHTMLHandler).Methods("GET")
+	r.HandleFunc("/map/{tileset}", server.mapHTMLHandler).Methods("GET")
+	handler := cors.New(cors.Options{
+		AllowedMethods: []string{"GET"},
+		// Debug:          true,
+	}).Handler(r)
+
+	http.Handle("/", handler)
 
 	port := "8080"
 	if os.Getenv("PORT") != "" {

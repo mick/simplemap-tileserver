@@ -26,6 +26,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.12 // indirect
 	github.com/paulmach/orb v0.5.0 // indirect
 	github.com/psanford/sqlite3vfshttp v0.0.0-20210815150654-07be1ade312e // indirect
+	github.com/rs/cors v1.8.3 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/net v0.1.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20221014153046-6fdb5e3db783 // indirect

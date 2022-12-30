@@ -8,5 +8,7 @@ To do this it uses a VFS for sqlite, so each time that sqlite reads a page it fe
 Adding to this Sqlite itself also has a page cache, defaulting to 2Mb. But this is only a cache of pages that sqlite perviously read (not the extra that was overread).
 
 
-The expection is that you provide a bucket and optionally a key prefix, and this tilesever will serve tiles from all mbtiles found on that path.
+The expectation is that you provide a bucket and optionally a key prefix, and this tilesever will serve tiles from all mbtiles found on that path. This is set via the env var `MBTILES_PATH` which should be the full bucket and path to the were tilesets are stored, like `gs:/bucketname/prefix/`.
+
+`TILESERVER_URL` should be set to the root URL of where this is deployed. This is used when contructing the url to tiles for tileJSON.
 
