@@ -1,5 +1,7 @@
 ## Tileserver
 
+[More info in blog post](https://mick.im/post/2022-12-vectors-tiles-remote-mbtiles)
+
 
 This tile server reads mbtiles files, that are on a remote storage like Google Cloud Storage or AWS S3.
 
