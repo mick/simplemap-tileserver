@@ -63,16 +63,16 @@ jobs:
       - name: Terraform Init
         id: init
         run: terraform init -input=false
-        working-directory: terraform/tileserver
+        working-directory: terraform
 
       - name: Terraform Workspace
         run: terraform workspace select prod
-        working-directory: terraform/tileserver
+        working-directory: terraform
 
       - name: Terraform Apply
         id: apply
         run: terraform apply -auto-approve -no-color -var="services_tag=${{ github.sha }}"
-        working-directory: terraform/tileserver
+        working-directory: terraform
 
       - name: Move Cache
         run: |
